@@ -10,6 +10,17 @@ set -vx
 #
 #
 #---------------------------------------------------------------------------
+#Crear un Archivo Tar Simple
+#tar -cvf archivo.tar archivo1 archivo2 directorio1
+#----------------------------------------------------
+#Crear un Archivo Tar y Comprimir con Gzip
+#tar -czvf archivo.tar.gz archivo1 archivo2 directorio1
+#----------------------------------------------------
+#Crear un Archivo Tar y Comprimir con Bzip2
+#tar -cjvf archivo.tar.bz2 archivo1 archivo2 directorio1
+#----------------------------------------------------
+#Crear un Archivo Tar y Comprimir con Xz
+#tar -cJvf archivo.tar.xz archivo1 archivo2 directorio1
 
 PRDSPECIF=$(echo ${S_PROCEXE} | cut -c 1-3)
 prdspecif=$(echo ${PRDSPECIF} | tr "[:upper:]" "[:lower:]")
