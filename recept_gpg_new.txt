@@ -1,0 +1,138 @@
+#!/bin/ksh
+
+set -vx
+
+ses=`echo $S_PROCEXE | cut -c 1-5`
+date_trait="`date +%d-%b-%Y`"
+heur_trait="`date +%T`"
+ficlog=$UNXLOG/"`date +%d-%b-%Y`"-"`date +%T`"-"$S_PROCEXE".log
+script="trecept_perl.sh"
+#SFR definition du fichier .cfg perl
+ficidf=$UNXEXDATA/galicia_client_recept.cfg
+
+ficctl=$UNXTMP/"$UNXPRDAPPLI"fpZ5s2.dat
+nocp=0
+#-----
+#  Fonction : controle acces fichier
+#-----
+sous_pgm1 () {
+ if mkdir ${ficctl}_verrou 2> /dev/null
+   then
+     sous_pgm2
+   else while [ -d ${ficctl}_verrou ]
+     do
+       sleep 1
+     done
+     sous_pgm2
+ fi
+}
+sous_pgm2 () {
+ echo "${S_PROCEXE}: Le fichier ${file} contenant $nb_enr enregistrements a ete recu avec succes le `date +%Y-%m-%d` a `date +%T` " >> $ficctl
+ rmdir ${ficctl}_verrou 2> /dev/null
+}
+#-----
+#  Debut du job trecept.sh
+#-----
+echo "${S_PROCEXE}:Demarrage du ${script} le `date +%d-%b-%Y` a `date +%T` " >> ${ficlog}
+#-----
+#Verification de la CFTRECEPT des fichiers present dans la config CFT
+
+for fictest in `ls ${CFTRECEPT}|grep ${ses} ${ficidf} | awk '{print $1}' FS=";"` ;do
+        if [ `grep $fictest $ficidf |wc -l` -eq 0 ];then
+        echo "${S_PROCEXE}:Le fichier $fictest  ne peut etre traite en reception car il n'est pas definit dans CFT">> ${ficlog}
+        echo "$S_CODSESS : $S_PROCEXE ne peut traiter en reception le fichier ${CFTRECEPT}/${fictest} car celui ci n'est pas definit dans CFT"|mailx -s "Alerte CFT:Fichier non defini" pierre.ledoux@mpsa.com
+        exit 1
+        fi
+done
+
+cd $CFTRECEPT
+
+grep ${ses} $ficidf | while IFS= read -r session;
+do
+
+fichier=`echo ${session} | awk '{print $1}' FS=";"`
+files=($(ls -ltr ${fichier}* | awk '{print $9}' | tr '\n' ' '))
+
+  if [ "${files[0]}" == "" ]
+        then
+                echo "There are no files in $(pwd)"
+                exit 0
+  fi
+
+  
+enc_file=$(echo "${files[0]}" | sed 's/\.[^.]*$//')
+dec_file=$(echo ${files[0]} | awk '{print $1}' FS=".")
+
+/users/evb00/exploit/bin/gpg/gpg --output "${dec_file}.dat" --decrypt "${files[0]}"
+rm "${files[0]}"
+
+  if [ `echo "${dec_file}.dat" | wc -w` -eq 0 ]
+    then
+        echo "${dec_file}.dat is empty, it will not be processed"
+        exit 0
+    else
+#SFR - Recuperation des champs dans le fichier .cfg perl
+        idf=`echo ${session} | awk '{print $2}' FS=";"`
+        mode=`echo ${session} | awk '{print $3}' FS=";"`
+
+      echo "${S_PROCEXE}:Debut du traitement de reception CFT IDF ${idf} du fichier ${dec_file}.dat a `date +%T`">> ${ficlog}
+       $CFTEXSCRIPT/cft_0ma.pl -mode=${mode} "${dec_file}.dat"
+      sleep 20
+
+      if [ -f "${dec_file}.dat" ]
+        then
+          echo "${S_PROCEXE}:Le fichier ${files[0]} a ete recu avec succes a `date +%T`" >> ${ficlog}
+          ret=`$UNXEXSCRIPT/generique/RETENTION_FICHIER ${S_CODSESS}`
+          nom_fic_sauve="${date_trait}"-"${heur_trait}"-`echo ${dec_file}.dat`.sav
+          cp -pr "${dec_file}.dat" "$UNXSAVDAT/${nom_fic_sauve}"
+          cp1=$?
+          cp -pr "${dec_file}.dat" "$UNXSAVE/${ret}tmp/${nom_fic_sauve}"
+          cp2=$?
+          mv "$UNXSAVE/${ret}tmp/${nom_fic_sauve}" "$UNXSAVE/${ret}/${nom_fic_sauve}"
+          mv1=$?
+          ctrl=`expr $cp1 + $cp2 + $mv1`
+          if [ $ctrl -eq 0 ];then
+          echo "${S_PROCEXE}:Le fichier ${dec_file}.dat a ete sauvegarde" >> ${ficlog}
+          else
+          echo "${S_PROCEXE}:La sauvegarde du fichier ${dec_file}.dat a rencontre un probleme" >> ${ficlog}
+          exit 1
+          fi
+          mv ${dec_file}.dat $UNXTMP
+          if [ $? -ne 0 ]
+            then
+              echo "${S_PROCEXE}:Erreur de copie du fichier ${dec_file}.dat dans UNXTMP" >> ${ficlog}
+              nocp=1
+            else
+              nb_enr=`wc -l "$UNXTMP/${dec_file}.dat" | awk '{print $1}'`
+              sous_pgm1
+              echo "${S_PROCEXE}:Le fichier ${dec_file}.dat est copie dans UNXTMP , il contient $nb_enr enregistrements " >> ${ficlog}
+          fi
+        else
+          echo "${S_PROCEXE}:Le fichier ${dec_file} n existe pas dans UNXRECEPT" >> ${ficlog}
+      fi
+  fi
+if [ -f $UNXRECEPT/${dec_file} ]
+then
+        rm ${dec_file}
+fi
+
+if [ -f $UNXTMP/"${dec_file}.dat" ]
+then
+        rm $UNXTMP/"${dec_file}.dat"
+fi
+
+unset files
+unset enc_file
+unset dec_file
+
+done
+
+#Verification que la copie vers UNXTMP est bien passe
+if [ $nocp -eq 1 ];then
+echo "${S_PROCEXE}:Probleme de copie de fichier vers UNXTMP" >> ${ficlog}
+exit 1
+fi
+echo "${S_PROCEXE}:Fin du ${script} le `date +%d-%b-%Y` a `date +%T` " >> ${ficlog}
+#-----
+#  Fin du job
+#-----
